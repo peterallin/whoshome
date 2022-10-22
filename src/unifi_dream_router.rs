@@ -6,7 +6,9 @@ use reqwest::{
     StatusCode,
 };
 use serde::{Deserialize, Serialize};
+use tracing::{info, trace};
 
+#[derive(Debug)]
 pub struct UnifiDreamRouter {
     http_client: reqwest::blocking::Client,
     login_url: String,
@@ -16,6 +18,7 @@ pub struct UnifiDreamRouter {
 
 impl crate::router::Router for UnifiDreamRouter {
     fn connected_clients(&self) -> Result<Vec<String>> {
+        info!("Getting list of connected clients from UnifiDreamRouter: {}", self.hostname);
         let request = self.http_client.get(&self.client_devices_url);
         self.send(request)?;
 
@@ -69,7 +72,9 @@ impl UnifiDreamRouter {
                     .ok_or_else(|| anyhow!("Failed to get status from response"))?
                     == StatusCode::UNAUTHORIZED
                 {
+                    trace!("Got 401, authorizing on {}", self.hostname);
                     self.login().context("Failed to login on router")?;
+                    trace!("Authorizing finished sending request again");
                     backup.send()?.error_for_status()?
                 } else {
                     return Err(e.into());

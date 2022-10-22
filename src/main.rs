@@ -1,11 +1,13 @@
 use anyhow::{Context, Result};
 use config::Config;
+use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt};
 
 mod config;
 mod router;
 mod unifi_dream_router;
 
 fn main() -> Result<()> {
+    configure_tracing();
     let config = config::get_config().context("Failed to read settings")?;
     let router = unifi_dream_router::UnifiDreamRouter::new(&config.router)
         .context("Failed to create router interface")?;
@@ -27,4 +29,11 @@ fn show_who_is_home(router: &dyn router::Router, config: &Config) -> Result<()> 
     }
 
     Ok(())
+}
+
+pub fn configure_tracing() {
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::new("whoshome=trace"))
+        .with(tracing_subscriber::fmt::layer())
+        .init();
 }
