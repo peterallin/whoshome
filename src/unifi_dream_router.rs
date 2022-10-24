@@ -72,7 +72,7 @@ impl UnifiDreamRouter {
                     .ok_or_else(|| anyhow!("Failed to get status from response"))?
                     == StatusCode::UNAUTHORIZED
                 {
-                    trace!("Got 401, authorizing on {}", self.hostname);
+                    trace!("Got 401, authenticating on: {}", self.hostname);
                     self.login().context("Failed to login on router")?;
                     trace!("Authorizing finished sending request again");
                     backup.send()?.error_for_status()?
