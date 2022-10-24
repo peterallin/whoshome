@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use config::Config;
-use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{prelude::*, util::SubscriberInitExt};
 
 mod config;
 mod router;
