@@ -8,10 +8,15 @@ mod unifi_dream_router;
 
 fn main() -> Result<()> {
     configure_tracing();
+    // changes::add(1,2);
+
     let config = config::get_config().context("Failed to read settings")?;
     let router = unifi_dream_router::UnifiDreamRouter::new(&config.router)
         .context("Failed to create router interface")?;
-    show_who_is_home(&router, &config)?;
+    loop {
+        show_who_is_home(&router, &config)?;
+        std::thread::sleep(std::time::Duration::from_secs(20));
+    }
     Ok(())
 }
 
