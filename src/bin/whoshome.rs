@@ -5,9 +5,7 @@ use router::{Client, Router};
 use tracing::trace;
 use tracing_subscriber::{prelude::*, util::SubscriberInitExt};
 
-mod config;
-mod router;
-mod unifi_dream_router;
+use whoshome::{config, router, unifi_dream_router};
 
 #[derive(clap::Parser)]
 struct Cli {
