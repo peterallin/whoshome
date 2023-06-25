@@ -16,7 +16,8 @@ use crate::router::Client;
 pub struct UnifiDreamRouter {
     http_client: reqwest::blocking::Client,
     login_url: String,
-    client_devices_url: String,
+    known_devices_url: String,
+    connected_devices_url: String,
     site_url: String,
     hostname: String,
     csrf_token: Cell<Option<String>>,
@@ -25,15 +26,40 @@ pub struct UnifiDreamRouter {
 impl crate::router::Router for UnifiDreamRouter {
     fn known_clients(&self) -> Result<Vec<Client>> {
         info!(
-            "Getting list of connected clients from UnifiDreamRouter: {}",
+            "Getting list of known clients from UnifiDreamRouter: {}",
             self.hostname
         );
-        let request = self.http_client.get(&self.client_devices_url);
+        let request = self.http_client.get(&self.known_devices_url);
         self.send(request)?;
 
         let client_devices: RouterResponse<UnifiClient> = self
             .http_client
-            .get(&self.client_devices_url)
+            .get(&self.known_devices_url)
+            .send()?
+            .error_for_status()?
+            .json()?;
+        let client_devices = client_devices.data;
+
+        Ok(client_devices
+            .into_iter()
+            .map(|c| Client {
+                name: c.name(),
+                mac: c.mac,
+            })
+            .collect())
+    }
+
+    fn online_clients(&self) -> Result<Vec<Client>> {
+        info!(
+            "Getting list of connected clients from UnifiDreamRouter: {}",
+            self.hostname
+        );
+        let request = self.http_client.get(&self.connected_devices_url);
+        self.send(request)?;
+
+        let client_devices: RouterResponse<UnifiClient> = self
+            .http_client
+            .get(&self.connected_devices_url)
             .send()?
             .error_for_status()?
             .json()?;
@@ -50,7 +76,7 @@ impl crate::router::Router for UnifiDreamRouter {
 
     fn block_client(&self, client: &Client) -> Result<()> {
         info!("Blocking {}", client.name);
-        let cmd_url = dbg!(format!("{}/cmd/stamgr", self.site_url));
+        let cmd_url = format!("{}/cmd/stamgr", self.site_url);
         let req = self
             .http_client
             .post(cmd_url)
@@ -61,7 +87,7 @@ impl crate::router::Router for UnifiDreamRouter {
 
     fn unblock_client(&self, client: &Client) -> Result<()> {
         info!("Unblocking {}", client.name);
-        let cmd_url = dbg!(format!("{}/cmd/stamgr", self.site_url));
+        let cmd_url = format!("{}/cmd/stamgr", self.site_url);
         let req = self
             .http_client
             .post(cmd_url)
@@ -82,7 +108,8 @@ impl UnifiDreamRouter {
             .build();
         let api = router.path("proxy").path("network").path("api");
         let site = api.path("s").path("default");
-        let client_devices_url = site.clone().path("rest").path("user").build();
+        let known_devices_url = site.clone().path("rest").path("user").build();
+        let connected_devices_url = site.clone().path("stat").path("sta").build();
         let http_client = reqwest::blocking::Client::builder()
             .danger_accept_invalid_certs(true)
             .cookie_store(true)
@@ -91,7 +118,8 @@ impl UnifiDreamRouter {
 
         Ok(UnifiDreamRouter {
             login_url,
-            client_devices_url,
+            known_devices_url,
+            connected_devices_url,
             http_client,
             site_url: site.build(),
             hostname: hostname.to_owned(),
