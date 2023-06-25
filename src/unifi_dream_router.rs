@@ -29,24 +29,7 @@ impl crate::router::Router for UnifiDreamRouter {
             "Getting list of known clients from UnifiDreamRouter: {}",
             self.hostname
         );
-        let request = self.http_client.get(&self.known_devices_url);
-        self.send(request)?;
-
-        let client_devices: RouterResponse<UnifiClient> = self
-            .http_client
-            .get(&self.known_devices_url)
-            .send()?
-            .error_for_status()?
-            .json()?;
-        let client_devices = client_devices.data;
-
-        Ok(client_devices
-            .into_iter()
-            .map(|c| Client {
-                name: c.name(),
-                mac: c.mac,
-            })
-            .collect())
+        self.get_client_list(&self.known_devices_url)
     }
 
     fn online_clients(&self) -> Result<Vec<Client>> {
@@ -54,24 +37,7 @@ impl crate::router::Router for UnifiDreamRouter {
             "Getting list of connected clients from UnifiDreamRouter: {}",
             self.hostname
         );
-        let request = self.http_client.get(&self.connected_devices_url);
-        self.send(request)?;
-
-        let client_devices: RouterResponse<UnifiClient> = self
-            .http_client
-            .get(&self.connected_devices_url)
-            .send()?
-            .error_for_status()?
-            .json()?;
-        let client_devices = client_devices.data;
-
-        Ok(client_devices
-            .into_iter()
-            .map(|c| Client {
-                name: c.name(),
-                mac: c.mac,
-            })
-            .collect())
+        self.get_client_list(dbg!(&self.connected_devices_url))
     }
 
     fn block_client(&self, client: &Client) -> Result<()> {
@@ -187,6 +153,20 @@ impl UnifiDreamRouter {
         debug!("Got CSRF token at login: {:?}", token);
         self.csrf_token.set(token);
         Ok(())
+    }
+
+    fn get_client_list(&self, url: &str) -> Result<Vec<Client>> {
+        let request = self.http_client.get(url);
+        let client_devices: RouterResponse<UnifiClient> = self.send(request)?.error_for_status()?.json()?;
+        let client_devices = client_devices.data;
+
+        Ok(client_devices
+            .into_iter()
+            .map(|c| Client {
+                name: c.name(),
+                mac: c.mac,
+            })
+            .collect())
     }
 }
 
