@@ -20,8 +20,8 @@ enum Commands {
     ShowWhosHome,
 }
 
-fn find_client(router: &dyn Router, client_name: &str) -> Result<Client> {
-    let clients = router.known_clients()?;
+async fn find_client(router: &dyn Router, client_name: &str) -> Result<Client> {
+    let clients = router.known_clients().await?;
     let client = clients
         .iter()
         .find(|c| c.name == client_name)
@@ -29,7 +29,8 @@ fn find_client(router: &dyn Router, client_name: &str) -> Result<Client> {
     Ok(client.clone())
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     configure_tracing();
     let options = Cli::parse();
     let config = config::get_config().context("Failed to read settings")?;
@@ -38,22 +39,26 @@ fn main() -> Result<()> {
 
     match options.command {
         Commands::Block { client_name } => {
-            router.block_client(&find_client(&router, &client_name)?)?
+            router
+                .block_client(&find_client(&router, &client_name).await?)
+                .await?
         }
         Commands::Unblock { client_name } => {
-            router.unblock_client(&find_client(&router, &client_name)?)?
+            router
+                .unblock_client(&find_client(&router, &client_name).await?)
+                .await?
         }
-        Commands::ShowWhosHome => show_who_is_home(&router, &config)?,
+        Commands::ShowWhosHome => show_who_is_home(&router, &config).await?,
     };
 
     Ok(())
 }
 
-fn show_who_is_home(router: &dyn router::Router, config: &Config) -> Result<()> {
+async fn show_who_is_home(router: &dyn router::Router, config: &Config) -> Result<()> {
     let clients: Vec<_> = router
         .online_clients()
+        .await
         .context("Failed to get list of connected client")?;
-
     trace!("Online clients {clients:?}");
 
     for person_home in config.persons.iter().filter(|p| {

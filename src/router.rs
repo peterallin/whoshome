@@ -1,10 +1,12 @@
 use anyhow::Result;
+use async_trait::async_trait;
 
+#[async_trait]
 pub trait Router {
-    fn known_clients(&self) -> Result<Vec<Client>>;
-    fn online_clients(&self) -> Result<Vec<Client>>;
-    fn block_client(&self, client: &Client) -> Result<()>;
-    fn unblock_client(&self, client: &Client) -> Result<()>;
+    async fn known_clients(&self) -> Result<Vec<Client>>;
+    async fn online_clients(&self) -> Result<Vec<Client>>;
+    async fn block_client(&self, client: &Client) -> Result<()>;
+    async fn unblock_client(&self, client: &Client) -> Result<()>;
 }
 
 #[derive(Debug, Clone)]

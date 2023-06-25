@@ -1,64 +1,64 @@
-use std::cell::Cell;
+use std::{ops::DerefMut, sync::Arc};
 
 use anyhow::{anyhow, Context, Result};
+use async_trait::async_trait;
 use early::Early;
 use netrc_rs::Netrc;
-use reqwest::{
-    blocking::{RequestBuilder, Response},
-    header::HeaderMap,
-    StatusCode,
-};
+use reqwest::{header::HeaderMap, RequestBuilder, Response, StatusCode};
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 use tracing::{debug, info, trace};
 
 use crate::router::Client;
 
 pub struct UnifiDreamRouter {
-    http_client: reqwest::blocking::Client,
+    http_client: reqwest::Client,
     login_url: String,
     known_devices_url: String,
     connected_devices_url: String,
     site_url: String,
     hostname: String,
-    csrf_token: Cell<Option<String>>,
+    csrf_token: Arc<Mutex<Option<String>>>,
 }
 
+#[async_trait]
 impl crate::router::Router for UnifiDreamRouter {
-    fn known_clients(&self) -> Result<Vec<Client>> {
+    async fn known_clients(&self) -> Result<Vec<Client>> {
         info!(
             "Getting list of known clients from UnifiDreamRouter: {}",
             self.hostname
         );
-        self.get_client_list(&self.known_devices_url)
+        self.get_client_list(&self.known_devices_url).await
     }
 
-    fn online_clients(&self) -> Result<Vec<Client>> {
+    async fn online_clients(&self) -> Result<Vec<Client>> {
         info!(
             "Getting list of connected clients from UnifiDreamRouter: {}",
             self.hostname
         );
         self.get_client_list(dbg!(&self.connected_devices_url))
+            .await
     }
 
-    fn block_client(&self, client: &Client) -> Result<()> {
+    async fn block_client(&self, client: &Client) -> Result<()> {
         info!("Blocking {}", client.name);
         let cmd_url = format!("{}/cmd/stamgr", self.site_url);
         let req = self
             .http_client
             .post(cmd_url)
             .json(&BlockCommand::new(&client.mac));
-        self.send(req)?;
+        self.send(req).await?;
         Ok(())
     }
 
-    fn unblock_client(&self, client: &Client) -> Result<()> {
+    async fn unblock_client(&self, client: &Client) -> Result<()> {
         info!("Unblocking {}", client.name);
         let cmd_url = format!("{}/cmd/stamgr", self.site_url);
         let req = self
             .http_client
             .post(cmd_url)
             .json(&UnblockCommand::new(&client.mac));
-        self.send(req)?;
+        self.send(req).await?;
         Ok(())
     }
 }
@@ -76,7 +76,7 @@ impl UnifiDreamRouter {
         let site = api.path("s").path("default");
         let known_devices_url = site.clone().path("rest").path("user").build();
         let connected_devices_url = site.clone().path("stat").path("sta").build();
-        let http_client = reqwest::blocking::Client::builder()
+        let http_client = reqwest::Client::builder()
             .danger_accept_invalid_certs(true)
             .cookie_store(true)
             .build()
@@ -89,27 +89,28 @@ impl UnifiDreamRouter {
             http_client,
             site_url: site.build(),
             hostname: hostname.to_owned(),
-            csrf_token: Cell::new(None),
+            csrf_token: Arc::new(Mutex::new(None)),
         })
     }
 
-    fn send(&self, request: RequestBuilder) -> Result<Response> {
-        let request = self.add_csrf_header(request);
+    async fn send(&self, request: RequestBuilder) -> Result<Response> {
+        let request = self.add_csrf_header(request).await;
         let backup = request
             .try_clone()
             .ok_or_else(|| anyhow!("Failed to clone request"))?;
 
-        let response = match request.send()?.error_for_status() {
+        let response = match request.send().await?.error_for_status() {
             Ok(response) => response,
             Err(e) => {
+
                 if e.status()
                     .ok_or_else(|| anyhow!("Failed to get status from response"))?
                     == StatusCode::UNAUTHORIZED
                 {
                     trace!("Got 401, authenticating on: {}", self.hostname);
-                    self.login().context("Failed to login on router")?;
-                    trace!("Authorizing finished sending request again");
-                    backup.send()?.error_for_status()?
+                    self.login().await.context("Failed to login on router")?;
+                    trace!("Authenticating finished sending request again");
+                    backup.send().await?.error_for_status()?
                 } else {
                     return Err(e.into());
                 }
@@ -118,24 +119,25 @@ impl UnifiDreamRouter {
 
         let token = get_csrf_token(response.headers())?;
         debug!("Got CSRF token: {:?}", token);
-        self.csrf_token.set(token);
+        *self.csrf_token.lock().await = token;
 
         Ok(response)
     }
 
-    fn add_csrf_header(&self, request: RequestBuilder) -> RequestBuilder {
-        match self.csrf_token.take() {
+    async fn add_csrf_header(&self, request: RequestBuilder) -> RequestBuilder {
+        let mut csrf_token = self.csrf_token.lock().await;
+        match csrf_token.deref_mut() {
             Some(t) => {
                 debug!("Adding csrf token: {}", t);
                 let req = request.header("x-csrf-token", t.clone());
-                self.csrf_token.set(Some(t));
+                *csrf_token = Some(t.to_owned());
                 req
             }
             None => request,
         }
     }
 
-    fn login(&self) -> Result<()> {
+    async fn login(&self) -> Result<()> {
         let password = get_password(&self.hostname)
             .with_context(|| format!("Failed to get password for {}", self.hostname))?;
         let resp = self
@@ -146,18 +148,20 @@ impl UnifiDreamRouter {
                 password,
             })
             .send()
+            .await
             .context("Login to router failed")?
             .error_for_status()
             .context("Login failed")?;
         let token = get_csrf_token(resp.headers())?;
         debug!("Got CSRF token at login: {:?}", token);
-        self.csrf_token.set(token);
+        *self.csrf_token.lock().await = token;
         Ok(())
     }
 
-    fn get_client_list(&self, url: &str) -> Result<Vec<Client>> {
+    async fn get_client_list(&self, url: &str) -> Result<Vec<Client>> {
         let request = self.http_client.get(url);
-        let client_devices: RouterResponse<UnifiClient> = self.send(request)?.error_for_status()?.json()?;
+        let resp = self.send(request).await;
+        let client_devices: RouterResponse<UnifiClient> = resp?.error_for_status()?.json().await?;
         let client_devices = client_devices.data;
 
         Ok(client_devices
